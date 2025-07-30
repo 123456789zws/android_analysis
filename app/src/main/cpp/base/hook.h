@@ -8,7 +8,7 @@
 #include "../third/dobby/include/dobby.h"
 #include "../third/byopen/hack_dlopen.h"
 #include "../third/utils/utils.h"
-#include "../log2file/app_file_writer.h"
+#include "../third/log2file/app_file_writer.h"
 
 using std::regex;
 using std::shared_ptr;
@@ -26,7 +26,7 @@ struct SymbolInfo {
 
 bool _resolve(SymbolInfo &item, const char *symbol, void *addr);
 
-bool resolve(fake_dlctx_ref_t handle, vector<SymbolInfo> *symbols);
+bool resolve(fake_dlctx_ref_t handle, vector<SymbolInfo *> *symbols);
 
 bool hookAll(vector<SymbolInfo> *symbols);
 //template<class T>
@@ -60,20 +60,13 @@ bool hookAll(vector<SymbolInfo> *symbols);
 #define ExternHookStub(Func, Ret, ...)  ExternHookRawOrgFunc(Func, Ret, ##__VA_ARGS__) \
     DefineHookStubFunc(Func, Ret, ##__VA_ARGS__);
 
-#define GetStack(x) __builtin_return_address(x)
 
 #define InlineHookAddr(Base, Addr, Func) DobbyHook((char *)Base + Addr, (dobby_dummy_func_t) & Hook_##Func, (dobby_dummy_func_t *)&pHook_##Func)
 
-#define GetStack_1()        GetStackInfo(1, __builtin_return_address(1))
+#define InlineHookSymbol(LibName, FuncName, Replace)       DobbyHook(DobbySymbolResolver(LibName,#FuncName),        \
+                                                            (dobby_dummy_func_t) &Replace, (dobby_dummy_func_t *)&pHook_##FuncName)
 
-#define GetStack0()        GetStackInfo(1, __builtin_return_address(0))
-#define GetStack1()        GetStackInfo(1, __builtin_return_address(1))
-#define GetStack2()        GetStackInfo(2, __builtin_return_address(0), \
-                                        __builtin_return_address(1))
 
-#define GetStack3()        GetStackInfo(3, __builtin_return_address(0), \
-                                        __builtin_return_address(1), \
-                                        __builtin_return_address(2))
 
 extern void
 _HookLogWitchLibWithStack(const string &libName, const string &funcName, void *ret, const char *fmt,
@@ -81,4 +74,3 @@ _HookLogWitchLibWithStack(const string &libName, const string &funcName, void *r
 
 extern void setLogRetOffset(void *offset);
 
-string stack2str(const vector<Stack> &stack);

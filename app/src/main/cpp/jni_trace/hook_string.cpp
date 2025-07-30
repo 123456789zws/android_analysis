@@ -1,65 +1,53 @@
 #include "hook.h"
 #include "art_method_name.h"
+#include "log_maker.h"
 
 //_ZN3art3JNI12NewStringUTFEP7_JNIEnvPKc
-DefineHookStub(NewStringUTF, jstring, JNIEnv *env, const char *utf) {
-    callDeep++;
-    defer([&]() {
-        callDeep--;
-    });
-    if (callDeep > 1) {
-        return pHook_NewStringUTF(env, utf);
-    }
-    auto stack = GetStack0();
+DefineHookStubCheckThreadPassJniTrace_String(NewStringUTF, jstring, JNIEnv *,env, const char *,utf) {
+    Logs logs;
+    logs.setStack(_stack);
+    logs.setJniEnv(env);
+    logs.setName("NewStringUTF");
+    logs.setParams("char*", utf);
     auto result = pHook_NewStringUTF(env, utf);
-    if (jniTrace.CheckTargetModule(stack)) {
-        string logs = format_string("jni call NewStringUTF: \n");
-        logs += format_string("\t\t\t\t\tstr %p: %s\n", utf, utf);
-        logs += format_string("\t\t\t\t\tret: %p\n", result);
-        logs += format_string("\t\t\t\t\tat: %p\n", stack[0].offset);
-        log2file("%s", logs.c_str());
-    }
+    logs.setResult("jint", result);
+    logs.log();
     return result;
 }
 
-DefineHookStub(GetStringUTFChars, const char*, JNIEnv *env, jstring java_string,
-               jboolean *is_copy) {
-    callDeep++;
-    defer([&]() {
-        callDeep--;
-    });
-    if (callDeep > 1) {
-        return pHook_GetStringUTFChars(env, java_string, is_copy);
-    }
-    auto stack = GetStack0();
+DefineHookStubCheckThreadPassJniTrace_String(GetStringUTFChars, const char*, JNIEnv *,env, jstring, java_string,
+               jboolean *,is_copy) {
+    Logs logs;
+    logs.setStack(_stack);
+    logs.setJniEnv(env);
+    logs.setName("GetStringUTFChars");
+    logs.setParams("jstring", java_string);
     auto result = pHook_GetStringUTFChars(env, java_string, is_copy);
-    if (jniTrace.CheckTargetModule(stack)) {
-        string logs = format_string("jni call GetStringUTFChars: \n");
-        logs += format_string("\t\t\t\t\tret %p: %s\n", java_string, result);
-        logs += format_string("\t\t\t\t\tat: %p\n", stack[0].offset);
-        log2file("%s", logs.c_str());
-    }
+    logs.setResult("char*", result);
+    logs.log();
     return result;
 }
 
-DefineHookStub(GetStringUTFLength, jsize, JNIEnv *env, jstring jstr) {
-    callDeep++;
-    defer([&]() {
-        callDeep--;
-    });
-    if (callDeep > 1) {
-        return pHook_GetStringUTFLength(env, jstr);
-    }
-    auto stack = GetStack0();
+DefineHookStubCheckThreadPassJniTrace_String(GetStringUTFLength, jsize, JNIEnv *,env, jstring ,jstr) {
+    Logs logs;
+    logs.setStack(_stack);
+    logs.setJniEnv(env);
+    logs.setName("GetStringUTFLength");
+    logs.setParams("jstring", jstr);
     auto result = pHook_GetStringUTFLength(env, jstr);
-    if (jniTrace.CheckTargetModule(stack)) {
-        string logs = format_string("jni call GetStringUTFLength: \n");
-        auto cstr = pHook_GetStringUTFChars(env, jstr, nullptr);
-        logs += format_string("\t\t\t\t\tstr %p: %s\n", jstr, cstr);
-        logs += format_string("\t\t\t\t\tret: %d\n", result);
-        logs += format_string("\t\t\t\t\tat: %p\n", stack[0].offset);
-        log2file("%s", logs.c_str());
-        delete cstr;
-    }
+    logs.setResult("jint", result);
+    logs.log();
     return result;
 }
+
+//DefineHookStub(NewString, jstring, JNIEnv *env, const jchar *unicodeChars, jsize len) {
+//    CheckStack0AndCall(NewString, env, unicodeChars, len);
+//}
+//DefineHookStub(GetStringLength, jsize, JNIEnv *env, jstring string) {
+//}
+//DefineHookStub(GetStringChars, const jchar*, JNIEnv *env, jstring string, jboolean *isCopy) {
+//}
+//DefineHookStub(ReleaseStringChars, void, JNIEnv *env, jstring string, const jchar *chars) {
+//}
+//DefineHookStub(ReleaseStringUTFChars, void, JNIEnv *env, jstring string, const char *utf) {
+//}

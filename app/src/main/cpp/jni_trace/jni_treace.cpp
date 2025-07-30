@@ -5,7 +5,6 @@
 #include <set>
 #include <dlfcn.h>
 
-#include <unwindstack/LocalUnwinder.h>
 #include "../third/byopen/hack_dlopen.h"
 #include "../third/utils/jni_helper.hpp"
 #include "../third/utils/linux_helper.h"
@@ -26,113 +25,91 @@ jobject CallStaticObjectMethod(JNIEnv *env, void *soc, jclass, jmethodID mid, ..
 
 JniTrace jniTrace;
 JniHelper jniHelper;
-__thread int callDeep = 0;
+__thread bool passJniTrace = false;
 __thread bool passCallMethod = false;
-
-
-DECLARE_PRINTF_FUNC(in_java_parse) {
-    logd("parse in java: %s %p ", args_type.c_str(), obj.l);
-    if (obj.l == nullptr) {
-        return "null";
-    }
+namespace format {
+    DECLARE_Java_Format_Func(in_java_parse) {
+//        logd("parse in java: %s %p ", args_type.c_str(), obj.l);
+        if (obj.l == nullptr) {
+            return "null";
+        }
 //#ifndef Android12
 //    if (!jniTrace.jniHelper.HandleScopeContains(env->env, obj.l)) {
-//        return format_string("invalid object[%s: %p]", args_type.c_str(), obj.l);
+//        return xbyl::format_string("invalid object[%s: %p]", args_type.c_str(), obj.l);
 //    }
 //    if (env->env->IsSameObject(obj.l, nullptr)) {
-//        return format_string("deleted object[%s: %p]", args_type.c_str(), obj.l);
+//        return xbyl::format_string("deleted object[%s: %p]", args_type.c_str(), obj.l);
 //    }
 //#endif
-    jobject gref = obj.l;
-    passCallMethod = true;
-    auto jret = env->env->CallStaticObjectMethod(jniTrace.frida_helper, jniTrace.object_2_string,
-                                                 gref);
+        jobject gref = obj.l;
+        passCallMethod = true;
+        auto jret = env->CallStaticObjectMethod(jniTrace.frida_helper, jniTrace.object_2_string,
+                                                gref);
 //    auto jret = (jstring) CallStaticObjectMethod(env->env, env->soc, jniTrace.frida_helper,
 //                                                 jniTrace.object_2_string, gref);
-    passCallMethod = false;
-    if (jret == nullptr) {
-        return "null";
+        passCallMethod = false;
+        if (jret == nullptr) {
+            return "null";
+        }
+        const char *ret = env->GetStringUTFChars((jstring) jret, nullptr);
+        string result = ret;
+        if (ret) {
+            env->ReleaseStringUTFChars((jstring) jret, ret);
+        }
+        env->DeleteLocalRef(jret);
+        return result;
     }
-    const char *ret = env->env->GetStringUTFChars((jstring) jret, nullptr);
-    string result = ret;
-    delete[] ret;
-    return result;
 }
 
-ExternHookStub(GetStringUTFLength, jsize, JNIEnv *env, jstring jstr);
+static int CheckAllowModule(const vector<Stack> &frame, const initializer_list<string> &strs) {
+    for (const auto &item: frame) {
+        for (int i = 0; i < strs.size(); i++) {
+            if (item.name.find(*(strs.begin() + i)) != string::npos) {
+                return i;
+            }
+        }
+    }
 
-ExternHookStub(GetStringUTFChars, const char*, JNIEnv *env, jstring java_string, jboolean *is_copy);
+//    string logs = "pass: ";
+//    for (const auto &item: frame) {
+//        logs += xbyl::format_string("%s:%p", item.name.c_str(), item.offset) + ", ";
+//    }
+//    logi(logs.c_str());
+    return -1;
+}
 
-ExternHookStub(NewStringUTF, jstring, JNIEnv *env, const char *utf);
+static int CheckFirstModule(const vector<Stack> &frame, const initializer_list<string> &strs) {
+    if (frame.size() == 0) {
+        logd("allow frame.size() <= 0");
+        return 0;
+    }
 
-ExternHookStub(RegisterNatives, jint, JNIEnv *env, jclass java_class,
-               const JNINativeMethod *methods, jint method_count);
+    const Stack *first = nullptr;
+    for (auto &item: frame) {
+        if (item.name.find("/libanalyse.so") == -1) {
+            first = &item;
+            break;
+        }
+    }
+    if (first == nullptr) {
+        logd("allow no first");
+        return 0;
+    }
 
-ExternHookStub(InvokeVirtualOrInterfaceWithVarArgs, jvalue, ScopedObjectAccessAlreadyRunnable soa,
-               jobject obj, jmethodID mid, va_list args);
+    for (int i = 0; i < strs.size(); i++) {
+        if (first->name.find(*(strs.begin() + i)) != string::npos) {
+            logd("pass %s:%p", first->name.c_str(), first->offset);
+            return -1;
+        }
+    }
 
-ExternHookStub(InvokeWithVarArgs, jvalue, ScopedObjectAccessAlreadyRunnable soa, jobject obj,
-               jmethodID mid, va_list args);
-
-ExternHookStub(SetObjectArrayElement, void, JNIEnv *env, jobjectArray array, jsize index,
-               jobject value);
-
-ExternHookStub(GetObjectArrayElement, jobject, JNIEnv *env, jobjectArray array, jsize index);
-
-#define ExternGetFieldHook(type) ExternHookStub(Get##type##Field, jobject, JNIEnv *env, jobject obj, jfieldID field)
-
-#define ExternSetFieldHook(type) ExternHookStub(Set##type##Field, void, JNIEnv *env, jobject obj, jfieldID field, jvalue v);
-
-ExternGetFieldHook(Object);
-
-ExternGetFieldHook(Boolean);
-
-ExternGetFieldHook(Byte);
-
-ExternGetFieldHook(Char);
-
-ExternGetFieldHook(Short);
-
-ExternGetFieldHook(Int);
-
-ExternGetFieldHook(Long);
-
-ExternGetFieldHook(Float);
-
-ExternGetFieldHook(Double);
-
-ExternSetFieldHook(Object);
-
-ExternSetFieldHook(Boolean);
-
-ExternSetFieldHook(Byte);
-
-ExternSetFieldHook(Char);
-
-ExternSetFieldHook(Short);
-
-ExternSetFieldHook(Int);
-
-ExternSetFieldHook(Long);
-
-ExternSetFieldHook(Float);
-
-ExternSetFieldHook(Double);
-
-
-#define AddSymbolInfo(symName)  SymbolInfo{.isReg=false, .sym=  Sym##symName, .stub=(void*)Hook_##symName, .org=(void**) &pHook_##symName}
-#define AddSymbolInfoReg(symName)  SymbolInfo{.isReg=true, .sym=  Sym##symName, .stub=(void*)Hook_##symName, .org=(void**) &pHook_##symName}
-vector<SymbolInfo> JniTrace::jniHooks;
+    logd("allow %s:%p", first->name.c_str(), first->offset);
+    return 0;
+}
 
 extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_andriod_analyse_hook_Native_nativeInitJniTrace(JNIEnv *env, jclass clazz,
-                                                        jclass frida_helper) {
+JNIEXPORT jboolean JNICALL init(JNIEnv *env, jclass frida_helper) {
     if (!jniTrace.init) {
-        if (!initSynName()) {
-            logi("initSynName error");
-            return false;
-        }
         vector<string> passJavaMethod = {
                 "void android.view.Choreographer.postFrameCallback(android.view.Choreographer$FrameCallback)",
                 "void android.view.Choreographer.removeFrameCallback(android.view.Choreographer$FrameCallback)",
@@ -140,41 +117,8 @@ Java_com_andriod_analyse_hook_Native_nativeInitJniTrace(JNIEnv *env, jclass claz
                 "long java.lang.Long.longValue()",
                 "long java.lang.System.nanoTime()"
         };
-        JniTrace::jniHooks = {
-                AddSymbolInfo(NewStringUTF),
-                AddSymbolInfo(GetStringUTFChars),
-                AddSymbolInfo(GetStringUTFLength),
-//                AddSymbolInfo(RegisterNatives),
-                AddSymbolInfoReg(InvokeVirtualOrInterfaceWithVarArgs),
-                AddSymbolInfoReg(InvokeWithVarArgs),
-                AddSymbolInfo(GetObjectField),
-                AddSymbolInfo(GetBooleanField),
-                AddSymbolInfo(GetByteField),
-                AddSymbolInfo(GetCharField),
-                AddSymbolInfo(GetShortField),
-                AddSymbolInfo(GetIntField),
-                AddSymbolInfo(GetLongField),
-                AddSymbolInfo(GetFloatField),
-                AddSymbolInfo(GetDoubleField),
-                AddSymbolInfo(SetObjectField),
-                AddSymbolInfo(SetBooleanField),
-                AddSymbolInfo(SetByteField),
-                AddSymbolInfo(SetCharField),
-                AddSymbolInfo(SetShortField),
-                AddSymbolInfo(SetIntField),
-                AddSymbolInfo(SetLongField),
-                AddSymbolInfo(SetFloatField),
-                AddSymbolInfo(SetDoubleField),
-                AddSymbolInfo(GetObjectArrayElement),
-                AddSymbolInfo(SetObjectArrayElement),
-        };
-        for (auto item: JniTrace::jniHooks) {
-            logi("--%s  %p %p", item.sym.c_str(), item.stub, item.org);
-        }
-//        const string target = "libprotect.so";
-        const string target = "libunity.so";
-//        const string target = "libdevices.so";
-        logi("init jni trace: %s", target.c_str());
+
+        logi("init jni trace!");
 
         fake_dlctx_ref_t handleLibArt = hack_dlopen("libart.so", 0);
         defer([&]() {
@@ -188,9 +132,60 @@ Java_com_andriod_analyse_hook_Native_nativeInitJniTrace(JNIEnv *env, jclass claz
             loge("jniHelper Init error!");
             return false;
         }
-        jniTrace.Init((jclass) env->NewGlobalRef(frida_helper), handleLibArt, {target},
+        jniTrace.Init((jclass) env->NewGlobalRef(frida_helper), handleLibArt,
+                      [](const vector<Stack> &frame) -> int {
+
+//                          return CheckFirstModule(frame, {
+//                                  {"/apex/com.android.art/"},
+//                                  {"/system/lib64/"},
+//                                  {"/system/framework/arm64/"},
+//                                  {"libandroid_runtime.so"},
+//                                  {"libanalyse.so"},
+//                                  {"libart.so"},
+//                                  {"libjavacore.so"},
+//                                  {"libnativeloader.so"},
+//                                  {"libopenjdk.so"},
+//                                  {"libopenjdkjvm.so"},
+//                                  {"libjavacrypto.so"},
+//                                  {"libicu_jni.so"},
+//                                  {"libgui.so"},
+//                                  {"libhwui.so"},
+//                                  {"boot.oat"},
+//                                  {"libnms.so"},
+//                                  {"liballiance.so"},
+//                                  {"libmonochrome_64.so"},
+//                                  {"libframework-connectivity-tiramisu-jni.so"},
+//                                  {"pcam.jar"},
+//                                  {"libapminsighta.so"},
+//                                  {"libmedia_jni.so"},
+//                                  {"com.google.android.gms"},
+//                                  {"com.google.android.trichrome"},
+//                                  {"libwebviewchromium_loader.so"},
+//                                  {"libconscrypt_gmscore_jni.so"},
+//                          });
+
+//                          for (const auto &item: frame) {
+//                              if (item.name.find("/memfd:") != string::npos &&
+//                                  item.name.find("jit-zygote-cache") == string::npos &&
+//                                  item.name.find("jit-cache") == string::npos) {
+//                                  return 1;
+//                              }
+//                          }
+//
+                          return CheckAllowModule(frame, {
+                                  {"libdmcorexjimwcql"}
+                          });
+                      },
                       passJavaMethod);
         jniTrace.Hook();
     }
     return true;
+}
+
+extern "C"
+JNIEXPORT jboolean
+JNICALL
+Java_com_android_analyse_hook_Native_nativeInitJniTrace(JNIEnv *env, jclass clazz,
+                                                        jclass frida_helper) {
+    return init(env, frida_helper);
 }
